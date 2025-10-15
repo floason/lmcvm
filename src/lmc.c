@@ -79,7 +79,8 @@ bool lmc_assemble(const char* buffer, size_t length, struct mailboxes* mailboxes
 {
     memset(mailboxes->pool, 0, NUM_MAILBOXES);
 
-    // Hold an array of all cached labels.
+    // Hold an array of all cached labels. A trie/dictionary would be more efficient,
+    // but there's only 100 mailboxes and this is a basic assembler anyway.
     struct pstring cached_labels[NUM_MAILBOXES] = { { NULL, 0 } };
 
     // This is a strange tokeniser, but I'm trying to minimize memory allocations here.
@@ -157,7 +158,7 @@ bool lmc_assemble(const char* buffer, size_t length, struct mailboxes* mailboxes
                     else
                     {
                         erroneous_token = start;
-                        goto assembly_fail;
+                        goto lexer_fail;
                     }
                 }
 
@@ -167,7 +168,7 @@ bool lmc_assemble(const char* buffer, size_t length, struct mailboxes* mailboxes
                     if (ir->op == OP_NULL)
                     {
                         erroneous_token = ir->label;
-                        goto assembly_fail;
+                        goto lexer_fail;
                     }
 
                     ir->next = (struct ir_node*)quick_malloc(sizeof(struct ir_node));
@@ -176,6 +177,14 @@ bool lmc_assemble(const char* buffer, size_t length, struct mailboxes* mailboxes
                     ir->offset = -1;
                     address++;
                     column = 0; // Column is always incremented below.
+
+                    // The program must not be bigger than 100 mailboxes.
+                    if (address >= NUM_MAILBOXES)
+                    {
+                        strcpy_s(mailboxes->error_msg, sizeof(mailboxes->error_msg), 
+                                 "Program is too large");
+                        goto compiler_fail;
+                    }
                 }
             }
 
@@ -192,20 +201,42 @@ bool lmc_assemble(const char* buffer, size_t length, struct mailboxes* mailboxes
     if (ir->label.string != NULL && ir->op == OP_NULL)
     {
         erroneous_token = ir->label;
-        goto assembly_fail;
+        goto lexer_fail;
     }
 
     // The second pass of the assembler is responsible for actually assembling the
     // mailboxes.
     ir = head;
+    address = 0;
     while (ir)
     {
         if (ir->op == OP_NULL)
             break;
 
-        // this is testing code - DAT/OUT will be incorrectly reported due to internal hacks
-        puts("instruction parsed:");
-        printf("LABEL: %s\nINSTRUCTION: %s (%d | %s)\n\n", ir->label.string, op_names[ir->op], ir->offset, ir->label_offset.string);
+        short value = ir->op * 100;
+        if (ir->label_offset.string != NULL)
+        {
+            bool label_found = false;
+            for (int i = 0; i < NUM_MAILBOXES; ++i)
+            {
+                if (ir->label_offset.length != cached_labels[i].length)
+                    continue;
+                if (util_strncasecmp(ir->label_offset.string, cached_labels[i].string, 
+                    ir->label_offset.length) != 0)
+                    continue;
+                label_found = true;
+                value += i;
+            }
+
+            if (!label_found)
+            {
+                erroneous_token = ir->label_offset;
+                goto lexer_fail;
+            }
+        }
+        else
+            value += ir->offset % 100;
+        mailboxes->pool[address++] = value;
 
         ir = ir->next;
     }
@@ -213,7 +244,7 @@ bool lmc_assemble(const char* buffer, size_t length, struct mailboxes* mailboxes
     cleanup_ir_node(head);
     return true;
 
-assembly_fail:
+lexer_fail:
     sprintf_s(mailboxes->error_msg, sizeof(mailboxes->error_msg), "Unknown token on line %d:%d: ",
               erroneous_token.line,
               erroneous_token.column);
@@ -221,6 +252,7 @@ assembly_fail:
               sizeof(mailboxes->error_msg), 
               erroneous_token.string,
               erroneous_token.length);
+compiler_fail:
     cleanup_ir_node(head);
     return false;
 }
