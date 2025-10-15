@@ -1,7 +1,40 @@
-#include <stdio.h>
+// floason (C) 2025
+// Licensed under the MIT License.
 
-int main()
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+#include "lmc.h"
+#include "util.h"
+
+int main(int argc, char** argv)
 {
-    puts("Hello world!");
+    if (argc < 2)
+    {
+        puts("usage: lmcvm path");
+        return 0;
+    }
+
+    char* buffer;
+    FILE* file;
+    errno_t err = fopen_s(&file, argv[1], "r");
+    if (err)
+    {
+        fprintf(stderr, "Could not read file \"%s\": %s\n", argv[1], strerror(err));
+        return 1;
+    }
+
+    fseek(file, 0, SEEK_END);
+    size_t length = ftell(file);
+    buffer = (char*)quick_malloc(length);
+    fseek(file, 0, SEEK_SET);
+    fread(buffer, 1, length, file);
+    fclose(file);
+
+    struct mailboxes mailboxes; 
+    if (lmc_assemble(buffer, length, &mailboxes) == false)
+        puts(mailboxes.error_msg);
+    free(buffer);
     return 0;
 }
