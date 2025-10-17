@@ -63,9 +63,13 @@ struct ir_node
 
 void cleanup_ir_node(struct ir_node* node)
 {
-    if (node->next)
-        cleanup_ir_node(node->next);
-    free(node);
+    struct ir_node* current;
+    struct ir_node* next = node;
+    while ((current = next) != NULL)
+    {
+        next = current->next;
+        free(current);
+    }
 }
 
 int program_isspace(int c)
