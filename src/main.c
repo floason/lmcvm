@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #include <stdio.h>
+#include <stdbool.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -32,9 +33,21 @@ int main(int argc, char** argv)
     fread(buffer, 1, length, file);
     fclose(file);
 
-    struct mailboxes mailboxes; 
-    if (lmc_assemble(buffer, length, &mailboxes) == false)
-        puts(mailboxes.error_msg);
+    struct mailboxes mailboxes;
+    mailboxes.instream = stdin;
+    mailboxes.outstream = stdout;
+
+    bool result = lmc_assemble(buffer, length, &mailboxes);
     free(buffer);
+    if (!result)
+        goto fail;
+
+    if (!lmc_execute(&mailboxes))
+        goto fail;
+
     return 0;
+
+fail:
+    puts(mailboxes.error_msg);
+    return 1;
 }

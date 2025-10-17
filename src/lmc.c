@@ -238,7 +238,7 @@ bool lmc_assemble(const char* buffer, size_t length, struct mailboxes* mailboxes
                 goto lexer_fail;
             }
         }
-        else
+        else if (ir->offset != -1)
             value += ir->offset % 100;
         mailboxes->pool[address++] = value;
 
@@ -250,8 +250,7 @@ bool lmc_assemble(const char* buffer, size_t length, struct mailboxes* mailboxes
 
 lexer_fail:
     sprintf_s(mailboxes->error_msg, sizeof(mailboxes->error_msg), "Unknown token on line %d:%d: ",
-              erroneous_token.line,
-              erroneous_token.column);
+              erroneous_token.line, erroneous_token.column);
     strncat_s(mailboxes->error_msg, 
               sizeof(mailboxes->error_msg), 
               erroneous_token.string,
@@ -262,7 +261,108 @@ compiler_fail:
 }
 
 // Execute an assembled LMC program.
-void lmc_execute(struct mailboxes* mailboxes, FILE* outstream, FILE* errstream)
+bool lmc_execute(struct mailboxes* mailboxes)
 {
+    // LMC registers.
+    unsigned char pc = 0;       // Program counter.
+    unsigned char ar = 0;       // Address register.
+    short acc = 0;              // Accumulator.
+    enum opcode ir = OP_NULL;   // Instruction register.
+    
+    // This LMC interpreter assumes that the accumulator can only hold 3-digit
+    // numbers ranging from 0-999, therefore negative numbers cannot be
+    // realistically handled. Some simulators treat this differently (i.e.
+    // tolerate -999 to 999, or just straight up undefined behaviour). Instead,
+    // this interpreter incorporates a negative flag that is set to true if
+    // a subtraction calculation underflows.
+    bool negative = false;
 
+    for (;;)
+    {
+        // Fetch the opcode from the current mailbox.
+        short data = mailboxes->pool[pc];
+        pc = (pc + 1) % 100;
+
+        // Decode the fetched opcode.
+        ir = data / 100 + ((data / 100 == INP) ? data % 100 - 1 : 0);
+        ar = data % 100;
+        
+        // Execute the fetched opcode.
+        switch (ir)
+        {
+            case HLT:
+                goto halt;
+            case ADD:
+            {
+                negative = false;
+                acc = (acc + mailboxes->pool[ar]) % 1000;
+                break;
+            }
+            case SUB:
+            {
+                negative = (acc < mailboxes->pool[ar]);
+                acc = (acc - mailboxes->pool[ar]) % 1000;
+                break;
+            }
+            case STA:
+            {
+                mailboxes->pool[ar] = acc;
+                break;
+            }
+            case LDA:
+            {
+                negative = false;
+                acc = mailboxes->pool[ar];
+                break;
+            }
+            case BRA:
+            {
+                pc = ar;
+                break;
+            }
+            case BRZ:
+            {
+                if (acc == 0)
+                    pc = ar;
+                break;
+            }
+            case BRP:
+            {
+                if (!negative)
+                    pc = ar;
+                break;
+            }
+            case INP:
+            {
+                // A three-digit value is read from the input file stream into
+                // the accumulator, setting the negative flag where necessary.
+                // A char buffer of size 5 is selected to account for the negative,
+                // sign maximum digit length and the terminating NUL character.
+                char buffer[5];
+                fgets(buffer, sizeof(buffer), mailboxes->instream);
+                negative = (buffer[0] == '-');
+                if (negative)
+                    acc = atoi(&buffer[1]);
+                else
+                    acc = atoi(buffer);
+                break;
+            }
+            case OUT:
+            {
+                // A newline-terminated string of the three-digit accumulator is
+                // sent to to the output file stream.
+                fprintf(mailboxes->outstream, "%d\n", acc);
+                break;
+            }
+            default:
+            {
+                sprintf_s(mailboxes->error_msg, sizeof(mailboxes->error_msg), "Unknown opcode %d",
+                          ir);
+                return false;
+            }
+        }
+    }
+
+halt:
+    return true;
 }

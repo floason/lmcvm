@@ -16,10 +16,13 @@ struct mailboxes
         short pool[NUM_MAILBOXES];
         char error_msg[NUM_MAILBOXES * 2];
     };
+
+    FILE* instream;
+    FILE* outstream;
 };
 
 // Assemble an LMC program.
 bool lmc_assemble(const char* buffer, size_t length, struct mailboxes* mailboxes);
 
 // Execute an assembled LMC program.
-void lmc_execute(struct mailboxes* mailboxes, FILE* outstream, FILE* errstream);
+bool lmc_execute(struct mailboxes* mailboxes);
