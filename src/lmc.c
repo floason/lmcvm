@@ -72,9 +72,14 @@ void cleanup_ir_node(struct ir_node* node)
     }
 }
 
-int program_isspace(int c)
+bool program_isspace(int c)
 {
-    return isspace(c) || c == '\0';
+    return isspace(c) || c == '\0' || c == ';';
+}
+
+bool program_eol(int c)
+{
+    return c == '\n' || c == ';';
 }
 
 // Assemble an LMC program. This is a two-pass assembler (the first pass generates an 
@@ -90,6 +95,7 @@ bool lmc_assemble(const char* buffer, size_t length, struct mailboxes* mailboxes
     // This is a strange tokeniser, but I'm trying to minimize memory allocations here.
     // Effectively offset into tokens within the buffer and use strncmp for string
     // comparisons. This makes up the first pass of the assembler.
+    bool is_comment = false;
     struct ir_node* head = (struct ir_node*)quick_malloc(sizeof(struct ir_node));
     struct ir_node* ir = head;
     struct pstring start = { NULL };
@@ -101,6 +107,24 @@ bool lmc_assemble(const char* buffer, size_t length, struct mailboxes* mailboxes
     ir->offset = -1;
     while (offset < length)
     {
+        if (is_comment)
+        {
+            if (buffer[offset++] == '\n')
+                is_comment = false;
+            continue;
+        }
+
+        // If the character is a semicolon, the rest of the line is a comment.
+        if (buffer[offset] == ';')
+        {
+            is_comment = true;
+            if (ir->label.string == NULL && ir->op == OP_NULL && start.string == NULL)
+            {
+                offset++;
+                continue;
+            }
+        }
+
         if (!program_isspace(buffer[offset]))
         {
             start.length++;
@@ -165,16 +189,21 @@ bool lmc_assemble(const char* buffer, size_t length, struct mailboxes* mailboxes
                         goto lexer_fail;
                     }
                 }
+            }
 
-                // If a newline is reached, then this is the end of the current instruction.
-                if (buffer[offset] == '\n' || (offset + 1) >= length)
+            // If EoL is reached, then this is the end of the current instruction.
+            if (program_eol(buffer[offset]) || (offset + 1) >= length)
+            {
+                if (ir->op == OP_NULL)
                 {
-                    if (ir->op == OP_NULL)
-                    {
+                    if (ir->label.string != NULL)
+                    {                        
                         erroneous_token = ir->label;
                         goto lexer_fail;
                     }
-
+                }
+                else
+                {
                     ir->next = (struct ir_node*)quick_malloc(sizeof(struct ir_node));
                     ir = ir->next;
                     ir->op = OP_NULL;
